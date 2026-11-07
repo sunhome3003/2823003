@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>윈디 날씨</title>
+<style>
+  :root { --bg:#eef3f9; --card:#fff; --text:#1d2633; --sub:#6b7686; --accent:#2f6fde; --line:#e2e8f0; --warm:#e5533d; --cold:#2f6fde; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#10151d; --card:#1a212c; --text:#e8edf4; --sub:#97a2b3; --accent:#6fa0ff; --line:#2a3340; --warm:#ff7b66; --cold:#6fa0ff; }
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif; }
+  body { display:flex; flex-direction:column; }
+  #windy { flex:1; min-height:300px; width:100%; border:0; display:block; }
+  .panel { background:var(--card); padding:14px 18px 16px; border-top:1px solid var(--line); }
+  .top { display:flex; align-items:center; gap:14px; }
+  .face { font-size:46px; line-height:1; }
+  .mood { font-size:17px; font-weight:700; }
+  .why { color:var(--sub); font-size:14px; margin-top:4px; line-height:1.5; }
+  .nums { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px; }
+  .nums div { background:var(--bg); border-radius:10px; padding:8px; text-align:center; font-size:13px; color:var(--sub); }
+  .nums b { display:block; font-size:18px; color:var(--text); margin-top:2px; }
+  .nums small { display:block; margin-top:2px; }
+  .up { color:var(--warm) !important; } .down { color:var(--cold) !important; }
+  .msg { color:var(--sub); padding:10px 0; }
+  .mail { background:var(--card); border-top:1px solid var(--line); padding:9px 18px; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mail .mt { color:var(--sub); font-size:12px; margin-left:6px; }
+</style>
+</head>
+<body>
+<iframe id="windy" title="윈디 날씨 지도"
+  src="https://embed.windy.com/embed2.html?lat=37.24&lon=127.18&detailLat=37.24&detailLon=127.18&zoom=8&level=surface&overlay=wind&product=ecmwf&menu=&message=true&marker=true&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=m%2Fs&metricTemp=%C2%B0C&radarRange=-1"></iframe>
+<div class="mail" id="mail"></div>
+<div class="panel" id="panel"><div class="msg">어제와 비교하는 중…</div></div>
+<script src="briefing.js"></script>
+<script>
+  const mb = window.MAIL_BRIEF;
+  const el = document.getElementById("mail");
+  if (mb) el.innerHTML = `📧 ${mb.text} <span class="mt">${mb.time} 기준</span>`;
+  else el.style.display = "none";
+</script>
+
+<script>
+const LAT = 37.24, LON = 127.18;   // 용인
+const f1 = v => v.toFixed(1) + "°";
+const diff = v => `<small class="${v >= 1 ? "up" : v <= -1 ? "down" : ""}">어제보다 ${v > 0 ? "+" : ""}${v.toFixed(1)}°</small>`;
+
+async function run() {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}`
+    + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m"
+    + "&hourly=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m"
+    + "&timezone=Asia%2FSeoul&past_days=1&forecast_days=1&wind_speed_unit=ms";
+  let r;
+  try { r = await fetch(url).then(x => x.json()); }
+  catch (e) { document.getElementById("panel").innerHTML = '<div class="msg">날씨 자료를 못 불러왔어요. 인터넷을 확인하세요.</div>'; return; }
+
+  const c = r.current, h = r.hourly;
+  const now = h.time.findIndex(t => t >= c.time.slice(0, 13));
+  const y = now - 24;
+  const yT = h.temperature_2m[y], yA = h.apparent_temperature[y];
+  const nT = c.temperature_2m, nA = c.apparent_temperature;
+  const dT = nT - yT, dA = nA - yA, gap = nA - nT;
+  const dWind = c.wind_speed_10m - h.wind_speed_10m[y];
+
+  // 기분: 어제 체감과 비교
+  let face, mood;
+  if (dA >= 5)      { face = "😊"; mood = "어제보다 훨씬 포근해요. 몸이 풀리고 기분도 가벼운 날!"; }
+  else if (dA >= 2) { face = "🙂"; mood = "어제보다 조금 따뜻하게 느껴져요. 산책하기 괜찮아요."; }
+  else if (dA > -2) { face = "😐"; mood = "어제랑 비슷하게 느껴져요. 어제 옷차림 그대로 OK."; }
+  else if (dA > -5) { face = "🥶"; mood = "어제보다 쌀쌀해요. 몸이 살짝 움츠러들 수 있어요."; }
+  else              { face = "🧊"; mood = "어제보다 훨씬 추워요! 밖에 나가면 확 춥게 느껴질 거예요."; }
+
+  // 이유
+  const why = [];
+  if (gap <= -2) why.push(`바람(${c.wind_speed_10m.toFixed(1)} m/s) 때문에 실제 기온보다 ${Math.abs(gap).toFixed(1)}° 더 춥게 느껴져요`);
+  else if (gap >= 2) why.push(`습도(${c.relative_humidity_2m}%) 때문에 실제 기온보다 ${gap.toFixed(1)}° 더 덥게 느껴져요`);
+  else why.push("체감이 실제 기온과 거의 같아요");
+  if (dWind >= 2) why.push("어제보다 바람이 강해졌어요");
+  else if (dWind <= -2) why.push("어제보다 바람이 잦아들었어요");
+  if (Math.abs(dT) >= 2 && Math.sign(dT) !== Math.sign(dA) && Math.abs(dA) < 2)
+    why.push("기온은 달라졌지만 바람·습도 덕분에 느낌은 비슷해요");
+
+  const wear = nA <= -5 ? "패딩·목도리·장갑" : nA <= 4 ? "두꺼운 코트·패딩" : nA <= 9 ? "코트·니트"
+    : nA <= 16 ? "자켓·가디건" : nA <= 22 ? "긴팔·얇은 겉옷" : nA <= 27 ? "반팔·얇은 셔츠" : "반팔·통풍 잘 되는 옷";
+
+  document.getElementById("panel").innerHTML = `
+    <div class="top"><div class="face">${face}</div>
+      <div><div class="mood">${mood}</div>
+      <div class="why">${why.join(" · ")}<br>👕 추천: <b style="color:var(--text)">${wear}</b> · 용인 ${c.time.slice(11)} 기준</div></div></div>
+    <div class="nums">
+      <div>기온<b>${f1(nT)}</b>${diff(dT)}</div>
+      <div>체감온도<b>${f1(nA)}</b>${diff(dA)}</div>
+      <div>어제 이 시각<b>${f1(yT)}</b><small>체감 ${f1(yA)}</small></div>
+    </div>`;
+}
+run();
+setTimeout(() => location.reload(), 30 * 60 * 1000);   // 30분마다 날씨·메일 새로 읽기
+</script>
+</body>
+</html>
